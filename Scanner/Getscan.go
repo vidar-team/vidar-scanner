@@ -19,9 +19,9 @@ func Getscan(url string, filename string) {
 
 	var wg sync.WaitGroup
 
-	concurrencylimit := 2000
+	concurrencylimit := 200
 
-	sleeptime := 500 * time.Millisecond
+	sleeptime := 5000 * time.Millisecond
 
 	workerfunc := func(data interface{}) {
 		defer wg.Done()

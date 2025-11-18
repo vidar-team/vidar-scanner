@@ -2,6 +2,7 @@ package basework
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 )
 
@@ -20,7 +21,8 @@ func SendMessage(client *http.Client, finalpath string) {
 		return
 	}
 
-	defer rep.Body.Close()
+	io.Copy(io.Discard, rep.Body)
+	rep.Body.Close()
 
 	if rep.StatusCode != 404 {
 		fmt.Printf("[found] %-6d %s\n", rep.StatusCode, finalpath)
