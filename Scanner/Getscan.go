@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"sync"
@@ -21,18 +22,26 @@ func Getscan(url string, filename string) {
 
 	concurrencylimit := 4000
 
-	//var rps float64 = 100
+	basework.InitAdaptiveLimiter(30)
 	//limiter := rate.NewLimiter(rate.Limit(rps), 1)
-	sleeptime := 500 * time.Millisecond
+	//sleeptime := 500 * time.Millisecond
 
 	workerfunc := func(data interface{}) {
 		defer wg.Done()
 
 		url := data.(string)
 
-		//limiter.Wait(context.Background())
-		basework.SendMessage(client, url)
-		time.Sleep(sleeptime)
+		//waitStart := time.Now()
+		basework.Limiter.Wait(context.Background())
+		//waitLatency := time.Since(waitStart)
+		//fmt.Println("[DEBUG] wait latency:", waitLatency)
+
+		start := time.Now()
+
+		err := basework.SendMessage(client, url)
+		latency := time.Since(start)
+		basework.RecordResult(err, latency)
+		//time.Sleep(sleeptime)
 	}
 
 	pool, err := ants.NewPoolWithFunc(concurrencylimit, workerfunc)

@@ -1,0 +1,10 @@
+/
+ /login
+ /admin
+ /robots.txt
+ /favicon.ico
+ /this-path-should-not-exist-1
+ /this-path-should-not-exist-2
+ /this-path-should-not-exist-3
+ /this-path-should-not-exist-4
+ /this-path-should-not-exist-5
