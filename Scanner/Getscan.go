@@ -12,10 +12,18 @@ import (
 )
 
 func Getscan(url string, filename string) {
-	finalpath := basework.UrlConstruct(url, filename)
+	finalChan, err := basework.UrlConstruct(url, filename)
+
+	t := &http.Transport{
+		//MaxIdleConns:        1000,
+		MaxIdleConnsPerHost: 500,
+		//IdleConnTimeout:     30 * time.Second,
+		DisableKeepAlives: false,
+	}
 
 	client := &http.Client{
-		Timeout: 10 * time.Second,
+		Transport: t,
+		Timeout:   10 * time.Second,
 	}
 
 	var wg sync.WaitGroup
@@ -56,7 +64,7 @@ func Getscan(url string, filename string) {
 	defer pool.Release()
 
 	fmt.Println("-----START-----")
-	for _, url = range finalpath {
+	for url := range finalChan {
 
 		wg.Add(1)
 

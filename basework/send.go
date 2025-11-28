@@ -21,7 +21,7 @@ func SendMessage(client *http.Client, finalpath string) error {
 		return err
 	}
 
-	io.Copy(io.Discard, rep.Body)
+	io.Copy(io.Discard, io.LimitReader(rep.Body, 4096))
 	defer rep.Body.Close()
 
 	//if rep.StatusCode == 200 || rep.StatusCode == 302 {
