@@ -16,6 +16,8 @@ func Predict404(text string) (string, error) {
 		return "", err
 	}
 
+	//fmt.Println(preds)
+
 	pred1, pred2 := preds[0], preds[1]
 	if pred1.Probability > pred2.Probability {
 		return pred1.Label, nil
