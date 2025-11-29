@@ -14,6 +14,7 @@ import (
 var (
 	DirTargetUrl   string
 	DictionaryPath string
+	Cookie         string
 )
 
 // dirCmd represents the dir command
@@ -37,7 +38,8 @@ func init() {
 
 	dirCmd.Flags().StringVarP(&DirTargetUrl, "url", "u", "", "Target URL (required)")
 	dirCmd.Flags().StringVarP(&DictionaryPath, "dict", "d", "", "Dictionary Path (required)")
+	dirCmd.Flags().StringVarP(&Cookie, "cookie", "c", "", "Cookie")
 
-	dirCmd.MarkFlagRequired("dirurl")
+	dirCmd.MarkFlagRequired("url")
 	dirCmd.MarkFlagRequired("dict")
 }

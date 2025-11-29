@@ -8,6 +8,7 @@ import (
 )
 
 func SendMessage(client *http.Client, finalpath string) error {
+	fmt.Println(finalpath)
 	req, err := CGETreq(finalpath)
 	var result strings.Builder
 
@@ -34,6 +35,7 @@ func SendMessage(client *http.Client, finalpath string) error {
 
 	code := rep.StatusCode
 
+	fmt.Println(code)
 	switch {
 
 	case code >= 200 && code < 300:
