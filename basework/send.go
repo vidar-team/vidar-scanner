@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-func SendMessage(client *http.Client, finalpath string) error {
+func SendMessage(client *http.Client, finalpath string, cookie string) error {
 	fmt.Println(finalpath)
-	req, err := CGETreq(finalpath)
+	req, err := CGETreq(finalpath, cookie)
 	var result strings.Builder
 
 	if err != nil {

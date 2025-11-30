@@ -5,7 +5,7 @@ import (
 	"net/http"
 )
 
-func CGETreq(finalpath string) (*http.Request, error) {
+func CGETreq(finalpath string, cookie string) (*http.Request, error) {
 	req, err := http.NewRequest("GET", finalpath, nil)
 	if err != nil {
 		return nil, err
@@ -24,6 +24,7 @@ func CGETreq(finalpath string) (*http.Request, error) {
 
 	req.Header.Set("User-Agent", randomUA)
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2")
+	req.Header.Set("Cookie", cookie)
 
 	return req, err
 }

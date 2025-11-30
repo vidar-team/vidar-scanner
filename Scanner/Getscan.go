@@ -11,7 +11,7 @@ import (
 	"github.com/panjf2000/ants/v2"
 )
 
-func Getscan(url string, filename string) {
+func Getscan(url string, filename string, cookie string) {
 	finalChan, err := basework.UrlConstruct(url, filename)
 
 	t := &http.Transport{
@@ -47,7 +47,7 @@ func Getscan(url string, filename string) {
 		start := time.Now()
 
 		task := func() error {
-			return basework.SendMessage(client, url)
+			return basework.SendMessage(client, url, cookie)
 		}
 
 		err := basework.RetryWithError(3, 1*time.Second, task)

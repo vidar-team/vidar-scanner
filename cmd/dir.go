@@ -27,7 +27,7 @@ var dirCmd = &cobra.Command{
 		fmt.Printf("[INFO] 目标 URL: %s\n", DirTargetUrl)
 		fmt.Printf("[INFO] 使用字典: %s\n", DictionaryPath)
 
-		scanner.Getscan(DirTargetUrl, DictionaryPath)
+		scanner.Getscan(DirTargetUrl, DictionaryPath, Cookie)
 
 		fmt.Printf("[INFO] 目录扫描结束。\n")
 	},
