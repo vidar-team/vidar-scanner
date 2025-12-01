@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -34,6 +35,7 @@ func HostScan(StartIP string, EndIP string) {
 	fmt.Println("-----START-----")
 
 	concurrencylimit := 2000
+	basework.InitAdaptiveLimiter(100)
 
 	scanfunc := func(data interface{}) {
 		defer wg.Done()
@@ -41,7 +43,19 @@ func HostScan(StartIP string, EndIP string) {
 		ip := Uint32ToIP(data.(uint32)).String()
 		task := func() bool { return basework.IsAliveTCP(ip, 1000*time.Millisecond) }
 
+		basework.Limiter.Wait(context.Background())
+
+		start := time.Now()
 		result := basework.RetryWithBool(3, 2*time.Second, task)
+
+		latency := time.Since(start)
+		var err error
+
+		if latency >= 2000*time.Millisecond {
+			err = fmt.Errorf("too slow")
+		}
+
+		basework.RecordResult(err, latency)
 
 		if result {
 			fmt.Printf("[Alive] %s\n", ip)

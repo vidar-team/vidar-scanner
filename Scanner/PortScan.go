@@ -1,6 +1,7 @@
 package scanner
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -14,17 +15,27 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	var mu sync.Mutex
 
 	concurrencylimit := 1000
-	rateLimit := 3 * time.Millisecond
+	//rateLimit := 3 * time.Millisecond
 	var ports []int
 
 	workerfunc := func(data interface{}) {
 		defer wg.Done()
 
 		p := data.(int)
+		basework.Limiter.Wait(context.Background())
 
-		time.Sleep(rateLimit)
+		//time.Sleep(rateLimit)
 
+		start := time.Now()
 		task := func() bool { return basework.TcpConnect(targetIp, p, 3*time.Second) }
+		latency := time.Since(start)
+		var err error
+
+		if latency >= 1000*time.Millisecond {
+			err = fmt.Errorf("latency too large")
+		}
+
+		basework.RecordResult(err, latency)
 
 		result := basework.RetryWithBool(3, 500*time.Millisecond, task)
 
