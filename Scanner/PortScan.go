@@ -64,10 +64,6 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 			fmt.Println("error: %v", err)
 			wg.Done()
 		}
-
-		//if port%1000 == 0 {
-		//	fmt.Printf("%d\n", port)
-		//}
 	}
 
 	wg.Wait()

@@ -8,7 +8,7 @@ import (
 )
 
 func SendMessage(client *http.Client, finalpath string, cookie string) error {
-	fmt.Println(finalpath)
+	//fmt.Println(finalpath)
 	req, err := CGETreq(finalpath, cookie)
 	var result strings.Builder
 
