@@ -28,9 +28,9 @@ func Getscan(url string, filename string, cookie string) {
 
 	var wg sync.WaitGroup
 
-	concurrencylimit := 4000
+	concurrencylimit := 1000
 
-	basework.InitAdaptiveLimiter(30)
+	basework.InitAdaptiveLimiter(50)
 	//limiter := rate.NewLimiter(rate.Limit(rps), 1)
 	//sleeptime := 500 * time.Millisecond
 
