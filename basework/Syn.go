@@ -67,7 +67,7 @@ func NewSynScanner(targetIp string, srcPort uint16) (*SynScanner, error) {
 		return nil, err
 	}
 
-	filter := fmt.Sprintf("src host %s dst host %s dst port %s", dst.String(), srcIP.String(), srcPort)
+	filter := fmt.Sprintf("tcp and src host %s and dst host %s and dst port %d", dst.String(), srcIP.String(), srcPort)
 
 	if err := handle.SetBPFFilter(filter); err != nil {
 		handle.Close()

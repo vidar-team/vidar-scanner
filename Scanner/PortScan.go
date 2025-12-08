@@ -14,6 +14,8 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
+	basework.InitAdaptiveLimiter(100)
+
 	const srcPort = 56789
 
 	scanner, err := basework.NewSynScanner(targetIp, srcPort)
@@ -37,15 +39,16 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 
 		start := time.Now()
 		//task := func() bool { return basework.TcpConnect(targetIp, p, 3*time.Second) }
-		state := scanner.ScanPort(uint16(p), 500*time.Millisecond)
+		state := scanner.ScanPort(uint16(p), 1000*time.Millisecond)
 		latency := time.Since(start)
 		var err error
 
 		switch state {
-		case "open", "closed":
+		case "open", "close":
 			err = nil
 		default:
 			err = fmt.Errorf("unexpected state: %s", state)
+			//fmt.Println(err)
 		}
 
 		basework.RecordResult(err, latency)
