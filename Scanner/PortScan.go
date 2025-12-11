@@ -14,7 +14,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 
-	basework.InitAdaptiveLimiter(100)
+	basework.InitAdaptiveLimiter(8000)
 
 	const srcPort = 56789
 
@@ -25,7 +25,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	}
 	defer scanner.Close()
 
-	concurrencylimit := 1000
+	concurrencylimit := 8000
 	//rateLimit := 3 * time.Millisecond
 	var ports []int
 
@@ -41,14 +41,17 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 		//task := func() bool { return basework.TcpConnect(targetIp, p, 3*time.Second) }
 		state := scanner.ScanPort(uint16(p), 1000*time.Millisecond)
 		latency := time.Since(start)
+
+		//fmt.Printf("[DEBUG] port=%d state=%q latency=%v\n", p, state, latency)
+
 		var err error
 
 		switch state {
-		case "open", "close":
+		case "open", "close", "filtered/timeout":
 			err = nil
 		default:
 			err = fmt.Errorf("unexpected state: %s", state)
-			//fmt.Println(err)
+			fmt.Println(err)
 		}
 
 		basework.RecordResult(err, latency)
@@ -70,6 +73,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 		fmt.Println("error: %v", err)
 	}
 
+	defer pool.Release()
 	fmt.Println("-----START-----")
 
 	for port := BeginPort; port <= EndPort; port++ {
@@ -83,7 +87,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	}
 
 	wg.Wait()
-	defer pool.Release()
+
 	fmt.Println("-----OVER-----")
 
 	return ports
