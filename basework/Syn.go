@@ -51,7 +51,7 @@ func NewSynScanner(targetIp string, srcPort uint16) (*SynScanner, error) {
 		return nil, fmt.Errorf("failed to get interface by name: %v", err)
 	}
 
-	handle, err := pcap.OpenLive(iface.Name, 65535, false, pcap.BlockForever) //打开pcap句柄
+	handle, err := pcap.OpenLive(iface.Name, 65535, false, 1*time.Second) //打开pcap句柄
 	if err != nil {
 		return nil, fmt.Errorf("failed to open pcap: %v", err)
 	}

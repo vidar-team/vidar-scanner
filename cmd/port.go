@@ -5,10 +5,11 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/spf13/cobra"
 	"os"
 	"vidar-scan/Scanner"
 	"vidar-scan/basework"
+
+	"github.com/spf13/cobra"
 )
 
 var (

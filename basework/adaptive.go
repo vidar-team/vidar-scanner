@@ -12,7 +12,7 @@ var (
 	Limiter   *rate.Limiter
 	MinRps    = 20.0
 	CurRps    = 50.0
-	MaxRps    = 2000.0
+	MaxRps    = 20000.0
 	Stats     ControlStat
 	StatLock  sync.Mutex
 	Ssthresh  = 320.0
