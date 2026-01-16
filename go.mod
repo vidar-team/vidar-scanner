@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/google/gopacket v1.1.19
+	github.com/libp2p/go-netroute v0.4.0
 	github.com/panjf2000/ants/v2 v2.11.3
 	github.com/rai-project/go-fasttext v0.0.0-20180418172337-7f1219685280
 	github.com/spf13/cobra v1.10.1

@@ -1,3 +1,5 @@
+//go:build windows
+
 package basework
 
 import (
@@ -6,25 +8,20 @@ import (
 	"sync"
 	"time"
 
-	//"time"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-
-	//"github.com/google/gopacket"
-	//"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"github.com/google/gopacket/routing"
+	"github.com/libp2p/go-netroute"
 )
 
 type SynScanner struct {
-	handle  *pcap.Handle   //pcap句柄，发包以及收包
-	iface   *net.Interface //网络接口，拿mac地址
+	handle  *pcap.Handle
+	iface   *net.Interface
 	srcIP   net.IP
-	dstIP   net.IP //目标主机ip
+	dstIP   net.IP
 	srcMAC  net.HardwareAddr
-	dstMAC  net.HardwareAddr //目标主机mac
-	srcPort uint16           // 固定源端口，用来demux回包
+	dstMAC  net.HardwareAddr
+	srcPort uint16
 	mu      sync.Mutex
 	waiters map[uint16]chan string
 }
@@ -32,36 +29,44 @@ type SynScanner struct {
 func NewSynScanner(targetIp string, srcPort uint16) (*SynScanner, error) {
 
 	dst := net.ParseIP(targetIp)
+
 	if dst == nil {
 		return nil, fmt.Errorf("invalid target ip: %s", targetIp)
 	}
 
-	router, err := routing.New() //读内核路由表
+	r, err := netroute.New()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create routing: %v", err)
 	}
 
-	iface, gw, srcIP, err := router.Route(dst) //确定访问dst这个ip时调用的接口(iface)，下一个ip(gw),源ip
+	iface, gw, srcIP, err := r.Route(dst)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to get routing: %v", err)
 	}
 
-	ifaceObj, err := net.InterfaceByName(iface.Name) // 通过接口名拿到完整网卡对象
+	deviceName, err := findPcapDeviceByIP(srcIP)
+
 	if err != nil {
-		return nil, fmt.Errorf("failed to get interface by name: %v", err)
+		return nil, fmt.Errorf("failed to find pcap device for ip %s: %v", srcIP, err)
 	}
 
-	handle, err := pcap.OpenLive(iface.Name, 65535, false, 1*time.Second) //打开pcap句柄
+	handle, err := pcap.OpenLive(deviceName, 65535, false, 1*time.Second)
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to open pcap: %v", err)
 	}
 
-	nextHop := dst //下一个ip
+	nextHop := dst
+
 	if gw != nil {
 		nextHop = gw
 	}
 
-	dstMAC, err := resolveMAC(handle, ifaceObj, srcIP, nextHop) //通过arp找到mac
+	srcMAC := iface.HardwareAddr
+	dstMAC, err := resolveMAC(handle, iface, srcIP, nextHop)
+
 	if err != nil {
 		handle.Close()
 		return nil, err
@@ -76,28 +81,43 @@ func NewSynScanner(targetIp string, srcPort uint16) (*SynScanner, error) {
 
 	s := &SynScanner{
 		handle:  handle,
-		iface:   ifaceObj,
+		iface:   iface,
 		srcIP:   srcIP,
 		dstIP:   dst,
-		srcMAC:  ifaceObj.HardwareAddr,
+		srcMAC:  srcMAC,
 		dstMAC:  dstMAC,
 		srcPort: srcPort,
 		waiters: make(map[uint16]chan string),
 	}
 
 	go s.listenReply()
-
 	return s, nil
+}
 
+func findPcapDeviceByIP(ip net.IP) (string, error) {
+	devs, err := pcap.FindAllDevs()
+
+	if err != nil {
+		return "", err
+	}
+
+	for _, d := range devs {
+		for _, addr := range d.Addresses {
+			if addr.IP.Equal(ip) {
+				return d.Name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("device not found for ip: %s", ip)
 }
 
 func (s *SynScanner) Close() {
+
 	if s.handle != nil {
 		s.handle.Close()
 	}
 }
 
-// 持续读包，结果送到对应端口的信道中
 func (s *SynScanner) listenReply() {
 	src := gopacket.NewPacketSource(s.handle, s.handle.LinkType())
 
@@ -141,7 +161,6 @@ func (s *SynScanner) listenReply() {
 
 		delete(s.waiters, dstPort)
 		s.mu.Unlock()
-
 	}
 }
 
@@ -170,7 +189,6 @@ func (s *SynScanner) ScanPort(port uint16, timeout time.Duration) string {
 	}
 }
 
-// 发送syn包
 func (s *SynScanner) sendSYN(dstPort uint16) error {
 	eth := &layers.Ethernet{
 		SrcMAC:       s.srcMAC,
@@ -194,7 +212,10 @@ func (s *SynScanner) sendSYN(dstPort uint16) error {
 		Window:  14600,
 	}
 
-	tcp.SetNetworkLayerForChecksum(ip4)
+	err := tcp.SetNetworkLayerForChecksum(ip4)
+	if err != nil {
+		return err
+	}
 
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{
@@ -207,10 +228,8 @@ func (s *SynScanner) sendSYN(dstPort uint16) error {
 	}
 
 	return s.handle.WritePacketData(buf.Bytes())
-
 }
 
-// 使用arp获得mac地址
 func resolveMAC(handle *pcap.Handle, iface *net.Interface, srcIP, nextHopIP net.IP) (net.HardwareAddr, error) {
 
 	if err := handle.SetBPFFilter("arp"); err != nil {
@@ -219,7 +238,7 @@ func resolveMAC(handle *pcap.Handle, iface *net.Interface, srcIP, nextHopIP net.
 
 	eth := &layers.Ethernet{
 		SrcMAC:       iface.HardwareAddr,
-		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, // 广播
+		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
 		EthernetType: layers.EthernetTypeARP,
 	}
 
@@ -269,7 +288,6 @@ func resolveMAC(handle *pcap.Handle, iface *net.Interface, srcIP, nextHopIP net.
 				if net.IP(reply.SourceProtAddress).Equal(nextHopIP) {
 					return net.HardwareAddr(reply.SourceHwAddress), nil
 				}
-
 			}
 
 		case <-timeout:
