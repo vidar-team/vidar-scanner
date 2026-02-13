@@ -3,9 +3,11 @@
 package basework
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/google/gopacket"
@@ -15,79 +17,85 @@ import (
 )
 
 type SynScanner struct {
-	handle  *pcap.Handle
+	recvHandle *pcap.Handle
+	sendHandle *pcap.Handle
+
 	iface   *net.Interface
 	srcIP   net.IP
 	dstIP   net.IP
 	srcMAC  net.HardwareAddr
 	dstMAC  net.HardwareAddr
 	srcPort uint16
+
 	mu      sync.Mutex
 	waiters map[uint16]chan string
+	sendMu  sync.Mutex
 }
 
 func NewSynScanner(targetIp string, srcPort uint16) (*SynScanner, error) {
-
 	dst := net.ParseIP(targetIp)
-
 	if dst == nil {
 		return nil, fmt.Errorf("invalid target ip: %s", targetIp)
 	}
 
 	r, err := netroute.New()
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to create routing: %v", err)
 	}
 
 	iface, gw, srcIP, err := r.Route(dst)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to get routing: %v", err)
 	}
 
 	deviceName, err := findPcapDeviceByIP(srcIP)
-
 	if err != nil {
 		return nil, fmt.Errorf("failed to find pcap device for ip %s: %v", srcIP, err)
 	}
 
-	handle, err := pcap.OpenLive(deviceName, 65535, false, 1*time.Second)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to open pcap: %v", err)
-	}
-
 	nextHop := dst
-
 	if gw != nil {
 		nextHop = gw
 	}
 
-	srcMAC := iface.HardwareAddr
-	dstMAC, err := resolveMAC(handle, iface, srcIP, nextHop)
-
+	// ARP handle
+	arpHandle, err := pcap.OpenLive(deviceName, 65535, false, 1*time.Second)
 	if err != nil {
-		handle.Close()
+		return nil, fmt.Errorf("failed to open pcap for arp: %v", err)
+	}
+	dstMAC, err := resolveMAC(arpHandle, iface, srcIP, nextHop)
+	arpHandle.Close()
+	if err != nil {
 		return nil, err
+	}
+
+	recvHandle, err := pcap.OpenLive(deviceName, 65535, false, 1*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open pcap recv: %v", err)
 	}
 
 	filter := fmt.Sprintf("tcp and src host %s and dst host %s and dst port %d", dst.String(), srcIP.String(), srcPort)
-
-	if err := handle.SetBPFFilter(filter); err != nil {
-		handle.Close()
+	if err := recvHandle.SetBPFFilter(filter); err != nil {
+		recvHandle.Close()
 		return nil, err
 	}
 
+	sendHandle, err := pcap.OpenLive(deviceName, 65535, false, 1*time.Second)
+	if err != nil {
+		recvHandle.Close()
+		return nil, fmt.Errorf("failed to open pcap send: %v", err)
+	}
+
 	s := &SynScanner{
-		handle:  handle,
-		iface:   iface,
-		srcIP:   srcIP,
-		dstIP:   dst,
-		srcMAC:  srcMAC,
-		dstMAC:  dstMAC,
-		srcPort: srcPort,
-		waiters: make(map[uint16]chan string),
+		recvHandle: recvHandle,
+		sendHandle: sendHandle,
+		iface:      iface,
+		srcIP:      srcIP,
+		dstIP:      dst,
+		srcMAC:     iface.HardwareAddr,
+		dstMAC:     dstMAC,
+		srcPort:    srcPort,
+		waiters:    make(map[uint16]chan string),
 	}
 
 	go s.listenReply()
@@ -96,7 +104,6 @@ func NewSynScanner(targetIp string, srcPort uint16) (*SynScanner, error) {
 
 func findPcapDeviceByIP(ip net.IP) (string, error) {
 	devs, err := pcap.FindAllDevs()
-
 	if err != nil {
 		return "", err
 	}
@@ -112,18 +119,19 @@ func findPcapDeviceByIP(ip net.IP) (string, error) {
 }
 
 func (s *SynScanner) Close() {
-
-	if s.handle != nil {
-		s.handle.Close()
+	if s.recvHandle != nil {
+		s.recvHandle.Close()
+	}
+	if s.sendHandle != nil {
+		s.sendHandle.Close()
 	}
 }
 
 func (s *SynScanner) listenReply() {
-	src := gopacket.NewPacketSource(s.handle, s.handle.LinkType())
+	src := gopacket.NewPacketSource(s.recvHandle, s.recvHandle.LinkType())
 
 	for packet := range src.Packets() {
 		tcpLayer := packet.Layer(layers.LayerTypeTCP)
-
 		if tcpLayer == nil {
 			continue
 		}
@@ -140,14 +148,12 @@ func (s *SynScanner) listenReply() {
 		dstPort := uint16(tcp.SrcPort)
 		s.mu.Lock()
 		ch, ok := s.waiters[dstPort]
-
 		if !ok {
 			s.mu.Unlock()
 			continue
 		}
 
 		state := "none"
-
 		if tcp.SYN && tcp.ACK {
 			state = "open"
 		} else if tcp.RST {
@@ -175,7 +181,7 @@ func (s *SynScanner) ScanPort(port uint16, timeout time.Duration) string {
 		s.mu.Lock()
 		delete(s.waiters, port)
 		s.mu.Unlock()
-		return "error"
+		return "send_error"
 	}
 
 	select {
@@ -187,6 +193,15 @@ func (s *SynScanner) ScanPort(port uint16, timeout time.Duration) string {
 		s.mu.Unlock()
 		return "filtered/timeout"
 	}
+}
+
+const (
+	wsaWouldBlock = syscall.Errno(10035)
+	wsaNoBufs     = syscall.Errno(10055)
+)
+
+func isTempSendErr(err error) bool {
+	return errors.Is(err, wsaNoBufs) || errors.Is(err, wsaWouldBlock)
 }
 
 func (s *SynScanner) sendSYN(dstPort uint16) error {
@@ -212,8 +227,7 @@ func (s *SynScanner) sendSYN(dstPort uint16) error {
 		Window:  14600,
 	}
 
-	err := tcp.SetNetworkLayerForChecksum(ip4)
-	if err != nil {
+	if err := tcp.SetNetworkLayerForChecksum(ip4); err != nil {
 		return err
 	}
 
@@ -227,11 +241,32 @@ func (s *SynScanner) sendSYN(dstPort uint16) error {
 		return err
 	}
 
-	return s.handle.WritePacketData(buf.Bytes())
+	payload := buf.Bytes()
+
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
+
+	sleep := 200 * time.Microsecond
+	for attempt := 0; attempt < 3; attempt++ {
+		err := s.sendHandle.WritePacketData(payload)
+		if err == nil {
+			return nil
+		}
+		if !isTempSendErr(err) {
+			return err
+		}
+		time.Sleep(sleep)
+		if sleep < 1*time.Millisecond {
+			sleep *= 2
+			if sleep > 1*time.Millisecond {
+				sleep = 1 * time.Millisecond
+			}
+		}
+	}
+	return fmt.Errorf("pcap send temp error (retries exceeded)")
 }
 
 func resolveMAC(handle *pcap.Handle, iface *net.Interface, srcIP, nextHopIP net.IP) (net.HardwareAddr, error) {
-
 	if err := handle.SetBPFFilter("arp"); err != nil {
 		return nil, fmt.Errorf("set arp BPF failed: %w", err)
 	}
@@ -277,19 +312,15 @@ func resolveMAC(handle *pcap.Handle, iface *net.Interface, srcIP, nextHopIP net.
 			if pkt == nil {
 				continue
 			}
-
 			if arpLayer := pkt.Layer(layers.LayerTypeARP); arpLayer != nil {
 				reply := arpLayer.(*layers.ARP)
-
 				if reply.Operation != layers.ARPReply {
 					continue
 				}
-
 				if net.IP(reply.SourceProtAddress).Equal(nextHopIP) {
 					return net.HardwareAddr(reply.SourceHwAddress), nil
 				}
 			}
-
 		case <-timeout:
 			return nil, fmt.Errorf("arp timeout for %v", nextHopIP)
 		}
