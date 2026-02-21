@@ -1,6 +1,5 @@
 id: nacos-version-info-leak
 requests:
-
   - method: GET
     path: ["/nacos/v1/console/server/state"]
     matchers-condition: and
@@ -10,3 +9,8 @@ requests:
       - type: word
         words: ["version", "standalone_mode", "function_mode"]
         condition: and
+    extractors:
+      - type: regex
+        name: version
+        regex: "\"version\"\\s*:\\s*\"([^\"]+)\""
+        group: 1

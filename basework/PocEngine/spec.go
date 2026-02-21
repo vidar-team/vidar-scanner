@@ -12,10 +12,16 @@ type PocRequest struct {
 	Headers map[string]string `yaml:"header"`
 	Body    string            `yaml:"body"`
 
-	MatchersCondition string    `yaml:"matchers-condition"`
-	Matchers          []Matcher `yaml:"matchers"`
+	MatchersCondition string      `yaml:"matchers-condition"`
+	Matchers          []Matcher   `yaml:"matchers"`
+	Extractors        []Extractor `yaml:"extractors"`
 }
-
+type Extractor struct {
+	Type  string `yaml:"type"`
+	Name  string `yaml:"name"`
+	Regex string `yaml:"regex"`
+	Group int    `yaml:"group"`
+}
 type Matcher struct {
 	Type      string   `yaml:"type"`
 	Part      string   `yaml:"part"`

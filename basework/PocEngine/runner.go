@@ -9,13 +9,33 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
 
 type RunResult struct {
-	Matched bool
-	Reason  string
+	Matched    bool
+	Reason     string
+	Fields     map[string]string
+	RequestRaw string
+}
+
+func normalizeKey(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Map(func(r rune) rune {
+		if r == '\ufeff' || r == '\u200b' || r == '\u200c' || r == '\u200d' {
+			return -1
+		}
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+	return strings.ToLower(s)
 }
 
 func LoadSpecFromFile(path string) (*PocSpec, error) {
@@ -23,14 +43,55 @@ func LoadSpecFromFile(path string) (*PocSpec, error) {
 	if err != nil {
 		return nil, err
 	}
-	var s PocSpec
-	if err := yaml.Unmarshal(b, &s); err != nil {
+	if len(b) >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF {
+		b = b[3:]
+	}
+
+	var doc yaml.Node
+	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return nil, err
 	}
-	if len(s.Requests) == 0 {
-		return nil, fmt.Errorf("yaml has no requests")
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("yaml root is not a mapping")
 	}
-	return &s, nil
+	root := doc.Content[0]
+
+	var id string
+	var reqNode *yaml.Node
+
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		k := root.Content[i]
+		v := root.Content[i+1]
+
+		nk := normalizeKey(k.Value)
+		if nk == "id" {
+			id = v.Value
+		}
+		if nk == "requests" || nk == "request" {
+			reqNode = v
+		}
+	}
+
+	if reqNode == nil {
+		return nil, fmt.Errorf("yaml has no requests (top-level keys include id/requests but key may contain invisible chars)")
+	}
+	if reqNode.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("requests must be a YAML list")
+	}
+
+	tmpBytes, err := yaml.Marshal(reqNode)
+	if err != nil {
+		return nil, err
+	}
+	var reqs []PocRequest
+	if err := yaml.Unmarshal(tmpBytes, &reqs); err != nil {
+		return nil, err
+	}
+	if len(reqs) == 0 {
+		return nil, fmt.Errorf("requests decoded to empty list (check indentation / tabs)")
+	}
+
+	return &PocSpec{ID: id, Requests: reqs}, nil
 }
 
 func NewDefaultHTTPClient(timeout time.Duration) *http.Client {
@@ -63,20 +124,35 @@ func RunOnce(client *http.Client, baseURL string, spec *PocSpec) (*RunResult, er
 		req.Header.Set(k, v)
 	}
 
+	reqDump := buildRequestRaw(method, url, req0.Headers, req0.Body)
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20)) // 2MB
+	respBodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
 	respBody := string(respBodyBytes)
 
 	ok, reason, err := evalMatchers(resp, respBody, req0.MatchersCondition, req0.Matchers)
 	if err != nil {
 		return nil, err
 	}
-	return &RunResult{Matched: ok, Reason: reason}, nil
+
+	res := &RunResult{
+		Matched:    ok,
+		Reason:     reason,
+		RequestRaw: reqDump,
+	}
+	if ok && len(req0.Extractors) > 0 {
+		fields, err := runExtractors(respBody, req0.Extractors)
+		if err != nil {
+			return nil, err
+		}
+		res.Fields = fields
+	}
+	return res, nil
 }
 
 func evalMatchers(resp *http.Response, body string, cond string, ms []Matcher) (bool, string, error) {
@@ -196,4 +272,63 @@ func evalOneMatcher(resp *http.Response, body string, m Matcher) (bool, error) {
 	default:
 		return false, fmt.Errorf("unknown matcher type: %s", m.Type)
 	}
+}
+
+func runExtractors(body string, extractors []Extractor) (map[string]string, error) {
+	out := map[string]string{}
+	for i, ex := range extractors {
+		typ := strings.ToLower(strings.TrimSpace(ex.Type))
+		if typ == "" {
+			continue
+		}
+		switch typ {
+		case "regex":
+			name := strings.TrimSpace(ex.Name)
+			if name == "" {
+				return nil, fmt.Errorf("extractor[%d] missing name", i)
+			}
+			pat := ex.Regex
+			if strings.TrimSpace(pat) == "" {
+				return nil, fmt.Errorf("extractor[%d] missing regex", i)
+			}
+			g := ex.Group
+			if g <= 0 {
+				g = 1
+			}
+			re, err := regexp.Compile(pat)
+			if err != nil {
+				return nil, fmt.Errorf("extractor[%d] regex compile error: %w", i, err)
+			}
+			m := re.FindStringSubmatch(body)
+			if len(m) > g {
+				out[name] = m[g]
+			}
+		default:
+			return nil, fmt.Errorf("unknown extractor type: %s", ex.Type)
+		}
+	}
+	return out, nil
+}
+
+func buildRequestRaw(method, url string, headers map[string]string, body string) string {
+	var sb strings.Builder
+	sb.WriteString(method)
+	sb.WriteString(" ")
+	sb.WriteString(url)
+	sb.WriteString("\n")
+
+	if len(headers) > 0 {
+		for k, v := range headers {
+			sb.WriteString(k)
+			sb.WriteString(": ")
+			sb.WriteString(v)
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString("\n")
+	if body != "" {
+		sb.WriteString(body)
+	}
+	return sb.String()
 }
