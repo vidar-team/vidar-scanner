@@ -36,6 +36,7 @@ func HostScan(StartIP string, EndIP string) {
 
 	concurrencylimit := 2000
 	basework.InitAdaptiveLimiter(100)
+	defer basework.StopAdaptiveLimiter()
 
 	scanfunc := func(data interface{}) {
 		defer wg.Done()
@@ -65,7 +66,7 @@ func HostScan(StartIP string, EndIP string) {
 	pool, err := ants.NewPoolWithFunc(concurrencylimit, scanfunc)
 
 	if err != nil {
-		fmt.Println("error: %v", err)
+		fmt.Printf("error: %v\n", err)
 	}
 
 	defer pool.Release()
@@ -77,7 +78,7 @@ func HostScan(StartIP string, EndIP string) {
 		err := pool.Invoke(ip)
 
 		if err != nil {
-			fmt.Println("error: %v", err)
+			fmt.Printf("error: %v\n", err)
 			wg.Done()
 		}
 	}

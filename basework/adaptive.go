@@ -9,14 +9,16 @@ import (
 )
 
 var (
-	Limiter   *rate.Limiter
-	MinRps    = 20.0
-	CurRps    = 50.0
-	MaxRps    = 20000.0
-	Stats     ControlStat
-	StatLock  sync.Mutex
-	Ssthresh  = 320.0
-	SlowStart = true
+	Limiter        *rate.Limiter
+	MinRps         = 20.0
+	CurRps         = 50.0
+	MaxRps         = 20000.0
+	Stats          ControlStat
+	StatLock       sync.Mutex
+	Ssthresh       = 320.0
+	SlowStart      = true
+	controllerLock sync.Mutex
+	controllerStop chan struct{}
 )
 
 type ControlStat struct {
@@ -26,9 +28,24 @@ type ControlStat struct {
 }
 
 func InitAdaptiveLimiter(InitRps float64) {
+	StopAdaptiveLimiter()
+
+	StatLock.Lock()
+	Stats = ControlStat{}
+	StatLock.Unlock()
+
 	CurRps = InitRps
 	Limiter = rate.NewLimiter(rate.Limit(CurRps), 1)
-	go ControlLimiter()
+	Ssthresh = 320.0
+	SlowStart = true
+
+	stop := make(chan struct{})
+
+	controllerLock.Lock()
+	controllerStop = stop
+	controllerLock.Unlock()
+
+	go ControlLimiter(stop)
 }
 
 func RecordResult(err error, latency time.Duration) {
@@ -42,9 +59,28 @@ func RecordResult(err error, latency time.Duration) {
 	}
 }
 
-func ControlLimiter() {
+func StopAdaptiveLimiter() {
+	controllerLock.Lock()
+	stop := controllerStop
+	controllerStop = nil
+	controllerLock.Unlock()
+
+	if stop != nil {
+		close(stop)
+	}
+}
+
+func ControlLimiter(stop <-chan struct{}) {
 	ticker := time.NewTicker(1 * time.Second)
-	for range ticker.C {
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+		}
+
 		StatLock.Lock()
 		s := Stats
 		Stats = ControlStat{}

@@ -126,12 +126,12 @@ func (s *SynScanner) listenReply() {
 			continue
 		}
 
-		state := "none"
+		state := PortStateNone
 
 		if tcp.SYN && tcp.ACK {
-			state = "open"
+			state = PortStateOpen
 		} else if tcp.RST {
-			state = "close"
+			state = PortStateClose
 		}
 
 		select {
@@ -146,6 +146,23 @@ func (s *SynScanner) listenReply() {
 }
 
 func (s *SynScanner) ScanPort(port uint16, timeout time.Duration) string {
+	state := PortStateFilteredTimeout
+
+	for attempt := 0; attempt < synScanAttempts; attempt++ {
+		state = s.scanPortOnce(port, timeout)
+		if !shouldRetryPortState(state) {
+			return state
+		}
+
+		if attempt < synScanAttempts-1 {
+			time.Sleep(synScanDelay)
+		}
+	}
+
+	return state
+}
+
+func (s *SynScanner) scanPortOnce(port uint16, timeout time.Duration) string {
 	ch := make(chan string, 1)
 
 	s.mu.Lock()
@@ -156,7 +173,7 @@ func (s *SynScanner) ScanPort(port uint16, timeout time.Duration) string {
 		s.mu.Lock()
 		delete(s.waiters, port)
 		s.mu.Unlock()
-		return "error"
+		return PortStateError
 	}
 
 	select {
@@ -166,7 +183,7 @@ func (s *SynScanner) ScanPort(port uint16, timeout time.Duration) string {
 		s.mu.Lock()
 		delete(s.waiters, port)
 		s.mu.Unlock()
-		return "filtered/timeout"
+		return PortStateFilteredTimeout
 	}
 }
 

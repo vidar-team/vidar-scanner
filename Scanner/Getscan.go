@@ -31,6 +31,7 @@ func Getscan(url string, filename string, cookie string) {
 	concurrencylimit := 1000
 
 	basework.InitAdaptiveLimiter(50)
+	defer basework.StopAdaptiveLimiter()
 	//limiter := rate.NewLimiter(rate.Limit(rps), 1)
 	//sleeptime := 500 * time.Millisecond
 
@@ -58,7 +59,7 @@ func Getscan(url string, filename string, cookie string) {
 
 	pool, err := ants.NewPoolWithFunc(concurrencylimit, workerfunc)
 	if err != nil {
-		fmt.Println("error: %v", err)
+		fmt.Printf("error: %v\n", err)
 	}
 
 	defer pool.Release()
@@ -70,7 +71,7 @@ func Getscan(url string, filename string, cookie string) {
 
 		err := pool.Invoke(url)
 		if err != nil {
-			fmt.Println("error: %v", err)
+			fmt.Printf("error: %v\n", err)
 			wg.Done()
 		}
 	}

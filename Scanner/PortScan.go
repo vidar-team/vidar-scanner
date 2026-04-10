@@ -15,6 +15,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	var mu sync.Mutex
 
 	basework.InitAdaptiveLimiter(8000)
+	defer basework.StopAdaptiveLimiter()
 
 	const srcPort = 56789
 
@@ -47,7 +48,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 		var err error
 
 		switch state {
-		case "open", "close", "filtered/timeout":
+		case basework.PortStateOpen, basework.PortStateClose, basework.PortStateFilteredTimeout:
 			err = nil
 		default:
 			err = fmt.Errorf("unexpected state: %s", state)
@@ -58,7 +59,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 
 		//result := basework.RetryWithBool(3, 500*time.Millisecond, task)
 
-		if state == "open" {
+		if state == basework.PortStateOpen {
 			mu.Lock()
 			ports = append(ports, p)
 			mu.Unlock()
@@ -70,7 +71,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 	pool, err := ants.NewPoolWithFunc(concurrencylimit, workerfunc)
 
 	if err != nil {
-		fmt.Println("error: %v", err)
+		fmt.Printf("error: %v\n", err)
 	}
 
 	defer pool.Release()
@@ -81,7 +82,7 @@ func PortScan(targetIp string, BeginPort int, EndPort int) []int {
 
 		err := pool.Invoke(port)
 		if err != nil {
-			fmt.Println("error: %v", err)
+			fmt.Printf("error: %v\n", err)
 			wg.Done()
 		}
 	}
