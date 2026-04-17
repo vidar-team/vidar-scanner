@@ -21,7 +21,7 @@ var (
 
 var pocCmd = &cobra.Command{
 	Use:   "poc",
-	Short: "Scan a target with local YAML POCs (file or directory)",
+	Short: "Scan a target with local YAML POCs (file or directory) using Nuclei SDK",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.TrimSpace(pocURL) == "" {
 			return fmt.Errorf("missing -u/--url")
@@ -38,56 +38,51 @@ var pocCmd = &cobra.Command{
 			return fmt.Errorf("no yaml templates found: %s", pocTemplate)
 		}
 
-		client := PocEngine.NewDefaultHTTPClient(pocTimeout)
+		fmt.Printf("Loaded %d templates from %s\n", len(paths), pocTemplate)
+		fmt.Println("-----START-----")
 
-		total := 0
-		matched := 0
-		failed := 0
-
-		for _, p := range paths {
-			total++
-
-			spec, err := PocEngine.LoadSpecFromFile(p)
-			if err != nil {
-				failed++
-				fmt.Printf("[!] LOAD FAIL  file=%s  err=%v\n", p, err)
-				continue
-			}
-
-			res, err := PocEngine.RunOnce(client, pocURL, spec)
-			if err != nil {
-				failed++
-				id := strings.TrimSpace(spec.ID)
+		// 使用Nuclei SDK批量执行模板
+		total, matched, failed, err := PocEngine.RunWithTemplates(
+			pocURL,
+			paths,
+			pocTimeout,
+			func(res *PocEngine.RunResult) {
+				// 处理每个结果
+				id := res.TemplateID
 				if id == "" {
 					id = "unknown"
 				}
-				fmt.Printf("[!] RUN FAIL   id=%s  file=%s  err=%v\n", id, p, err)
-				continue
-			}
 
-			id := strings.TrimSpace(spec.ID)
-			if id == "" {
-				id = "unknown"
-			}
+				// 找到对应的模板文件路径
+				filePath := findTemplatePath(paths, id)
 
-			if res.Matched {
-				matched++
-				fmt.Printf("[+] MATCHED  id=%s  file=%s  reason=%s\n", id, p, res.Reason)
+				if res.Matched {
+					fmt.Printf("[+] MATCHED  id=%s  file=%s  severity=%s\n",
+						id, filePath, res.Severity)
+					fmt.Printf("    reason=%s\n", res.Reason)
 
-				if strings.TrimSpace(res.RequestRaw) != "" {
-					fmt.Println("----- request -----")
-					fmt.Print(res.RequestRaw)
-					fmt.Println("\n-------------------")
-				}
-
-				if len(res.Fields) > 0 {
-					for k, v := range res.Fields {
-						fmt.Printf("    %s: %s\n", k, v)
+					if res.RequestRaw != "" {
+						fmt.Println("----- request -----")
+						fmt.Print(res.RequestRaw)
+						fmt.Println("\n-------------------")
 					}
+
+					if len(res.Fields) > 0 {
+						for k, v := range res.Fields {
+							fmt.Printf("    %s: %s\n", k, v)
+						}
+					}
+				} else {
+					fmt.Printf("[-] NOT MATCHED  id=%s  file=%s  reason=%s\n",
+						id, filePath, res.Reason)
 				}
-			} else {
-				fmt.Printf("[-] NOT MATCHED  id=%s  file=%s  reason=%s\n", id, p, res.Reason)
-			}
+			},
+		)
+
+		fmt.Println("-----OVER-----")
+
+		if err != nil {
+			fmt.Printf("[!] Error: %v\n", err)
 		}
 
 		fmt.Printf("\n== SUMMARY == total=%d matched=%d failed=%d\n", total, matched, failed)
@@ -95,6 +90,7 @@ var pocCmd = &cobra.Command{
 	},
 }
 
+// expandTemplates 扩展模板路径（支持单文件或目录）
 func expandTemplates(path string) ([]string, error) {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -131,6 +127,24 @@ func expandTemplates(path string) ([]string, error) {
 
 	sort.Strings(out)
 	return out, nil
+}
+
+// findTemplatePath 根据模板ID查找文件路径（简化版）
+func findTemplatePath(paths []string, templateID string) string {
+	// Nuclei返回的是模板ID，我们需要找到对应的文件
+	// 这里简化处理，返回第一个匹配的路径或空
+	for _, p := range paths {
+		// 可以根据文件名或内容匹配，这里简化
+		base := filepath.Base(p)
+		if strings.Contains(base, templateID) || strings.Contains(templateID, base) {
+			return p
+		}
+	}
+	// 如果找不到，返回"unknown"
+	if len(paths) > 0 {
+		return paths[0]
+	}
+	return "unknown"
 }
 
 func init() {
